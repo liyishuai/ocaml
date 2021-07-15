@@ -540,7 +540,7 @@ let emit_instr env fallthrough i =
       else I.sub (int n) esp;
       cfi_adjust_cfa_offset n;
       env.stack_offset <- env.stack_offset + n
-  | Lop(Iload(chunk, addr)) ->
+  | Lop(Iload(chunk, addr, _mut)) ->
       let dest = i.res.(0) in
       begin match chunk with
       | Word_int | Word_val | Thirtytwo_signed | Thirtytwo_unsigned ->
@@ -555,7 +555,7 @@ let emit_instr env fallthrough i =
           I.movsx (addressing addr WORD i 0) (reg dest)
       | Single ->
           I.fld (addressing addr REAL4 i 0)
-      | Double | Double_u ->
+      | Double ->
           I.fld (addressing addr REAL8 i 0)
       end
   | Lop(Istore(chunk, addr, _)) ->
@@ -573,7 +573,7 @@ let emit_instr env fallthrough i =
             I.fld (reg i.arg.(0));
             I.fstp (addressing addr REAL4 i 1)
           end
-      | Double | Double_u ->
+      | Double ->
           if is_tos i.arg.(0) then
             I.fstp (addressing addr REAL8 i 1)
           else begin
@@ -581,6 +581,11 @@ let emit_instr env fallthrough i =
             I.fstp (addressing addr REAL8 i 1)
           end
       end
+  | Lop(Ipoll { return_label }) ->
+    begin match return_label with
+      None -> ()
+    | Some lbl -> I.jmp (label lbl)
+    end
   | Lop(Ialloc { bytes = n; dbginfo }) ->
       if env.f.fun_fast then begin
         load_domain_state ebx;
@@ -770,7 +775,6 @@ let emit_instr env fallthrough i =
       if Array.length i.arg = 2 && is_tos i.arg.(1) then
         I.fxch st1;
       emit_floatspecial s
-  | Lop (Iname_for_debugger _) -> ()
   | Lreloadretaddr ->
       ()
   | Lreturn ->

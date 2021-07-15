@@ -2,9 +2,14 @@
 (*                                                                        *)
 (*                                 OCaml                                  *)
 (*                                                                        *)
-(*                  Mark Shinwell, Jane Street Europe                     *)
+(*      Xavier Leroy and Damien Doligez, projet Cambium, INRIA Paris      *)
+(*               Sadiq Jaffer, OCaml Labs Consultancy Ltd                 *)
+(*          Stephen Dolan and Mark Shinwell, Jane Street Europe           *)
 (*                                                                        *)
-(*   Copyright 2014--2018 Jane Street Group LLC                           *)
+(*   Copyright 2021 Institut National de Recherche en Informatique et     *)
+(*     en Automatique.                                                    *)
+(*   Copyright 2021 OCaml Labs Consultancy Ltd                            *)
+(*   Copyright 2021 Jane Street Group LLC                                 *)
 (*                                                                        *)
 (*   All rights reserved.  This file is distributed under the terms of    *)
 (*   the GNU Lesser General Public License version 2.1, with the          *)
@@ -12,17 +17,10 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(** Coalescing of per-instruction information into possibly-discontiguous
-    regions of code delimited by labels.  This is used for collating
-    register availability and lexical block scoping information into a
-    concise form. *)
+(** Analyses related to the insertion of [Ipoll] operations. *)
 
-[@@@ocaml.warning "+a-4-30-40-41-42"]
+val instrument_fundecl : future_funcnames:Misc.Stdlib.String.Set.t
+    -> Mach.fundecl -> Mach.fundecl
 
-module Make (S : Compute_ranges_intf.S_functor)
-  : Compute_ranges_intf.S
-      with module Index := S.Index
-      with module Key := S.Key
-      with module Subrange_state := S.Subrange_state
-      with module Subrange_info := S.Subrange_info
-      with module Range_info := S.Range_info
+val requires_prologue_poll : future_funcnames:Misc.Stdlib.String.Set.t
+    -> fun_name:string -> Mach.instruction -> bool

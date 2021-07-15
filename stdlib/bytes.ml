@@ -84,7 +84,7 @@ let extend s left right =
   let len = length s ++ left ++ right in
   let r = create len in
   let (srcoff, dstoff) = if left < 0 then -left, 0 else 0, left in
-  let cpylen = min (length s - srcoff) (len - dstoff) in
+  let cpylen = Int.min (length s - srcoff) (len - dstoff) in
   if cpylen > 0 then unsafe_blit s srcoff r dstoff cpylen;
   r
 
@@ -222,6 +222,36 @@ let mapi f s =
     for i = 0 to l - 1 do unsafe_set r i (f i (unsafe_get s i)) done;
     r
   end
+
+let fold_left f x a =
+  let r = ref x in
+  for i = 0 to length a - 1 do
+    r := f !r (unsafe_get a i)
+  done;
+  !r
+
+let fold_right f a x =
+  let r = ref x in
+  for i = length a - 1 downto 0 do
+    r := f (unsafe_get a i) !r
+  done;
+  !r
+
+let exists p s =
+  let n = length s in
+  let rec loop i =
+    if i = n then false
+    else if p (unsafe_get s i) then true
+    else loop (succ i) in
+  loop 0
+
+let for_all p s =
+  let n = length s in
+  let rec loop i =
+    if i = n then true
+    else if p (unsafe_get s i) then loop (succ i)
+    else false in
+  loop 0
 
 let uppercase_ascii s = map Char.uppercase_ascii s
 let lowercase_ascii s = map Char.lowercase_ascii s
@@ -388,7 +418,7 @@ let of_seq i =
   let buf = ref (make 256 '\000') in
   let resize () =
     (* resize *)
-    let new_len = min (2 * length !buf) Sys.max_string_length in
+    let new_len = Int.min (2 * length !buf) Sys.max_string_length in
     if length !buf = new_len then failwith "Bytes.of_seq: cannot grow bytes";
     let new_buf = make new_len '\000' in
     blit !buf 0 new_buf 0 !n;

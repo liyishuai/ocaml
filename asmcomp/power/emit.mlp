@@ -398,6 +398,7 @@ module BR = Branch_relaxation.Make (struct
 
     let classify_instr = function
       | Lop (Ialloc _)
+      | Lop (Ipoll _)
       (* [Ialloc_far] does not need to be here, since its code sequence
          never involves any conditional branches that might need relaxing. *)
       | Lcondbranch _
@@ -464,13 +465,17 @@ module BR = Branch_relaxation.Make (struct
       size 3 (2 + tocload_size()) (2 + tocload_size())
     | Lop(Iextcall { alloc = false; _}) -> size 1 2 2
     | Lop(Istackoffset _) -> 1
-    | Lop(Iload(chunk, addr)) ->
+    | Lop(Iload(chunk, addr, _mut)) ->
       if chunk = Byte_signed
       then load_store_size addr + 1
       else load_store_size addr
     | Lop(Istore(_chunk, addr, _)) -> load_store_size addr
     | Lop(Ialloc _) -> 5
     | Lop(Ispecific(Ialloc_far _)) -> 6
+    | Lop(Ipoll { return_label = Some(_) }) -> 5
+    | Lop(Ipoll { return_label = None }) -> 3
+    | Lop(Ispecific(Ipoll_far { return_label = Some(_) } )) -> 5
+    | Lop(Ispecific(Ipoll_far { return_label = None } )) -> 4
     | Lop(Iintop Imod) -> 3
     | Lop(Iintop(Icomp _)) -> 4
     | Lop(Iintop _) -> 1
@@ -481,7 +486,6 @@ module BR = Branch_relaxation.Make (struct
     | Lop(Iintoffloat) -> 4
     | Lop(Iopaque) -> 0
     | Lop(Ispecific _) -> 1
-    | Lop (Iname_for_debugger _) -> 0
     | Lreloadretaddr -> 2
     | Lreturn -> 2
     | Llabel _ -> 0
@@ -500,6 +504,9 @@ module BR = Branch_relaxation.Make (struct
 
   let relax_allocation ~num_bytes:bytes ~dbginfo =
     Lop (Ispecific (Ialloc_far { bytes; dbginfo }))
+
+  let relax_poll ~return_label =
+    Lop (Ispecific (Ipoll_far { return_label }))
 
   (* [classify_addr], above, never identifies these instructions as needing
      relaxing.  As such, these functions should never be called. *)
@@ -526,6 +533,36 @@ let emit_alloc env i bytes dbginfo far =
     `	bl	{emit_label env.call_gc_label}\n`;
     record_frame env i.live (Dbg_alloc dbginfo);
     `{emit_label lbl}:	addi	{emit_reg i.res.(0)}, 31, {emit_int size_addr}\n`
+  end
+
+let emit_poll env i return_label far =
+  if env.call_gc_label = 0 then env.call_gc_label <- new_label ();
+  let offset = Domainstate.(idx_of_field Domain_young_limit) * 8 in
+  `	{emit_string lg}	0, {emit_int offset}(30)\n`;
+  `	{emit_string cmplg}	31, 0\n`;
+  if not far then begin
+    begin match return_label with
+    | None ->
+    begin
+      `	bltl	{emit_label env.call_gc_label}\n`;
+      record_frame env i.live (Dbg_alloc [])
+    end
+    | Some return_label ->
+      begin
+        ` bltl  {emit_label env.call_gc_label}\n`;
+        record_frame env i.live (Dbg_alloc []);
+        ` b   {emit_label return_label}\n`
+      end
+    end;
+  end else begin
+    let lbl = new_label () in
+    `	bge	{emit_label lbl}\n`;
+    `	bl	{emit_label env.call_gc_label}\n`;
+    record_frame env i.live (Dbg_alloc []);
+    ` {emit_label lbl}:	\n`;
+    match return_label with
+    | None ->   ()
+    | Some return_label -> ` b   {emit_label return_label}\n`
   end
 
 (* Output the assembly code for an instruction *)
@@ -733,7 +770,7 @@ let emit_instr env i =
     | Lop(Istackoffset n) ->
         `	addi	1, 1, {emit_int (-n)}\n`;
         adjust_stack_offset env n
-    | Lop(Iload(chunk, addr)) ->
+    | Lop(Iload(chunk, addr, _mut)) ->
         let loadinstr =
           match chunk with
           | Byte_unsigned -> "lbz"
@@ -744,7 +781,7 @@ let emit_instr env i =
           | Thirtytwo_signed -> if ppc64 then "lwa" else "lwz"
 	  | Word_int | Word_val -> lg
           | Single -> "lfs"
-          | Double | Double_u -> "lfd" in
+          | Double -> "lfd" in
         emit_load_store loadinstr addr i.arg 0 i.res.(0);
         if chunk = Byte_signed then
           `	extsb	{emit_reg i.res.(0)}, {emit_reg i.res.(0)}\n`
@@ -756,12 +793,16 @@ let emit_instr env i =
 	  | Thirtytwo_unsigned | Thirtytwo_signed -> "stw"
 	  | Word_int | Word_val -> stg
           | Single -> "stfs"
-          | Double | Double_u -> "stfd" in
+          | Double -> "stfd" in
         emit_load_store storeinstr addr i.arg 1 i.arg.(0)
     | Lop(Ialloc { bytes; dbginfo }) ->
         emit_alloc env i bytes dbginfo false
     | Lop(Ispecific(Ialloc_far { bytes; dbginfo })) ->
         emit_alloc env i bytes dbginfo true
+    | Lop(Ipoll { return_label }) ->
+        emit_poll env i return_label false
+    | Lop(Ispecific(Ipoll_far { return_label })) ->
+        emit_poll env i return_label true
     | Lop(Iintop Isub) ->               (* subfc has swapped arguments *)
         `	subfc	{emit_reg i.res.(0)}, {emit_reg i.arg.(1)}, {emit_reg i.arg.(0)}\n`
     | Lop(Iintop Imod) ->
@@ -844,7 +885,6 @@ let emit_instr env i =
     | Lop(Ispecific sop) ->
         let instr = name_for_specific sop in
         `	{emit_string instr}	{emit_reg i.res.(0)}, {emit_reg i.arg.(0)}, {emit_reg i.arg.(1)}, {emit_reg i.arg.(2)}\n`
-    | Lop (Iname_for_debugger _) -> ()
     | Lreloadretaddr ->
         `	{emit_string lg}	11, {emit_int(retaddr_offset env)}(1)\n`;
         `	mtlr	11\n`

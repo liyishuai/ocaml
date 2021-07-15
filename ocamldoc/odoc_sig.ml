@@ -341,7 +341,7 @@ module Analyser =
 
 
     let manifest_structure env name_comment_list type_expr =
-      match type_expr.desc with
+      match get_desc type_expr with
       | Tobject (fields, _) ->
         let f (field_name, _, type_expr) =
           let comment_opt =
@@ -373,7 +373,7 @@ module Analyser =
       match type_kind with
         Types.Type_abstract ->
           Odoc_type.Type_abstract
-      | Types.Type_variant l ->
+      | Types.Type_variant (l,_) ->
           let f {Types.cd_id=constructor_name;cd_args;cd_res=ret_type} =
             let constructor_name = Ident.name constructor_name in
             let comment_opt =

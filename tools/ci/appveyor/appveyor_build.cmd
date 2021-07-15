@@ -105,7 +105,7 @@ rem needs upgrading.
 set CYGWIN_PACKAGES=cygwin make diffutils
 set CYGWIN_COMMANDS=cygcheck make diff
 if "%PORT%" equ "mingw32" (
-  rem mingw64-i686-runtime does not need explictly installing, but it's useful
+  rem mingw64-i686-runtime does not need explicitly installing, but it's useful
   rem to have the version reported.
   set CYGWIN_PACKAGES=%CYGWIN_PACKAGES% mingw64-i686-gcc-core mingw64-i686-runtime
   set CYGWIN_COMMANDS=%CYGWIN_COMMANDS% i686-w64-mingw32-gcc cygcheck
@@ -122,6 +122,7 @@ if "%PORT%" equ "cygwin64" (
   set CYGWIN_PACKAGES=%CYGWIN_PACKAGES% gcc-core flexdll
   set CYGWIN_COMMANDS=%CYGWIN_COMMANDS% x86_64-pc-cygwin-gcc flexlink
 )
+if "%PORT:~0,6%%BOOTSTRAP_FLEXDLL%" equ "cygwinfalse" set CYGWIN_PACKAGES=%CYGWIN_PACKAGES% flexdll
 
 set CYGWIN_INSTALL_PACKAGES=
 set CYGWIN_UPGRADE_REQUIRED=%FORCE_CYGWIN_UPGRADE%

@@ -20,7 +20,7 @@ include $(ROOTDIR)/Makefile.common
 TARGET_BINDIR ?= $(BINDIR)
 
 COMPILER=$(ROOTDIR)/ocamlc$(EXE)
-CAMLC=$(CAMLRUN) $(COMPILER)
+CAMLC=$(OCAMLRUN) $(COMPILER)
 COMPFLAGS=-strict-sequence -absname -w +a-4-9-41-42-44-45-48-70 \
           -g -warn-error +A -bin-annot -nostdlib -principal \
           -safe-string -strict-formats
@@ -28,7 +28,7 @@ ifeq "$(FLAMBDA)" "true"
 OPTCOMPFLAGS += -O3
 endif
 OPTCOMPILER=$(ROOTDIR)/ocamlopt
-CAMLOPT=$(CAMLRUN) $(OPTCOMPILER)
+CAMLOPT=$(OCAMLRUN) $(OPTCOMPILER)
 CAMLDEP=$(BOOT_OCAMLC) -depend
 DEPFLAGS=-slash
 
@@ -158,7 +158,7 @@ camlhead%: tmphead%.exe
 # Again, pattern weirdness here means that the dot is always present so that
 # tmpheader.exe matches.
 tmpheader%exe: $(HEADERPROGRAM)%$(O)
-	$(call MKEXE_BOOT,$@,$^ $(EXTRALIBS))
+	$(call MKEXE_USING_COMPILER,$@,$^ $(EXTRALIBS))
 # FIXME This is wrong - mingw could invoke strip; MSVC equivalent?
 ifneq "$(UNIX_OR_WIN32)" "win32"
 	strip $@
@@ -176,7 +176,7 @@ camlheader_ur: camlheader
 
 ifeq "$(UNIX_OR_WIN32)" "unix"
 tmptargetcamlheader%exe: $(TARGETHEADERPROGRAM)%$(O)
-	$(call MKEXE_BOOT,$@,$^ $(EXTRALIBS))
+	$(call MKEXE_USING_COMPILER,$@,$^ $(EXTRALIBS))
 	strip $@
 
 $(TARGETHEADERPROGRAM)%$(O): $(HEADERPROGRAM).c
@@ -210,8 +210,6 @@ clean::
 clean::
 	rm -f $(CAMLHEADERS)
 
-.SUFFIXES: .mli .ml .cmi .cmo .cmx
-
 export AWK
 
 %.cmi: %.mli
@@ -242,7 +240,7 @@ stdlib__%.cmx:
 	           -o $@ -c $(filter %.ml, $^)
 
 # Dependencies on the compiler
-COMPILER_DEPS=$(filter-out -use-prims $(CAMLRUN), $(CAMLC))
+COMPILER_DEPS=$(filter-out -use-prims $(OCAMLRUN), $(CAMLC))
 $(OBJS) std_exit.cmo: $(COMPILER_DEPS)
 $(OBJS:.cmo=.cmi) std_exit.cmi: $(COMPILER_DEPS)
 $(OBJS:.cmo=.cmx) std_exit.cmx: $(OPTCOMPILER)
@@ -256,6 +254,7 @@ $(OTHERS:.cmo=.cmx) std_exit.cmx: stdlib.cmx
 
 clean::
 	rm -f *.cm* *.o *.obj *.a *.lib *.odoc
+	rm -rf flexdll
 
 include .depend
 

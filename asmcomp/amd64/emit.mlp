@@ -526,13 +526,15 @@ let emit_instr env fallthrough i =
         emit_call "caml_c_call";
         record_frame env i.live (Dbg_other i.dbg);
         if system <> S_win64 then begin
-          (* TODO: investigate why such a diff.
-             This comes from:
-            http://caml.inria.fr/cgi-bin/viewvc.cgi?view=revision&revision=12664
 
-             If we do the same for Win64, we probably need to change
-             amd64nt.asm accordingly.
-          *)
+          (* In amd64.S, "caml_c_call" tail-calls the C function (in order to
+             produce nicer backtraces), so we need to restore r15 manually after
+             it returns (note that this increases code size).
+
+             In amd64nt.asm (used for Win64), "caml_c_call" invokes the C
+             function via a regular call, and restores r15 itself, thus avoiding
+             the code size increase. *)
+
           I.mov (domain_field Domainstate.Domain_young_ptr) r15
         end
       end else begin
@@ -546,7 +548,7 @@ let emit_instr env fallthrough i =
       if n <> 0
       then cfi_adjust_cfa_offset n;
       env.stack_offset <- env.stack_offset + n
-  | Lop(Iload(chunk, addr)) ->
+  | Lop(Iload(chunk, addr, _mut)) ->
       let dest = res i 0 in
       begin match chunk with
       | Word_int | Word_val ->
@@ -565,7 +567,7 @@ let emit_instr env fallthrough i =
           I.movsxd (addressing addr DWORD i 0) dest
       | Single ->
           I.cvtss2sd (addressing addr REAL4 i 0) dest
-      | Double | Double_u ->
+      | Double ->
           I.movsd (addressing addr REAL8 i 0) dest
       end
   | Lop(Istore(chunk, addr, _)) ->
@@ -581,7 +583,7 @@ let emit_instr env fallthrough i =
       | Single ->
           I.cvtsd2ss (arg i 0) xmm15;
           I.movss xmm15 (addressing addr REAL4 i 1)
-      | Double | Double_u ->
+      | Double ->
           I.movsd (arg i 0) (addressing addr REAL8 i 1)
       end
   | Lop(Ialloc { bytes = n; dbginfo }) ->
@@ -613,6 +615,27 @@ let emit_instr env fallthrough i =
         let label = record_frame_label env i.live (Dbg_alloc dbginfo) in
         def_label label;
         I.lea (mem64 NONE 8 R15) (res i 0)
+      end
+  | Lop(Ipoll { return_label }) ->
+      I.cmp (domain_field Domainstate.Domain_young_limit) r15;
+      let gc_call_label = new_label () in
+      let lbl_after_poll = match return_label with
+                  | None -> new_label()
+                  | Some(lbl) -> lbl in
+      let lbl_frame =
+        record_frame_label env i.live (Dbg_alloc [])
+      in
+      begin match return_label with
+      | None -> I.jbe (label gc_call_label)
+      | Some return_label -> I.ja (label return_label)
+      end;
+      env.call_gc_sites <-
+        { gc_lbl = gc_call_label;
+          gc_return_lbl = lbl_after_poll;
+          gc_frame_lbl = lbl_frame; } :: env.call_gc_sites;
+      begin match return_label with
+      | None -> def_label lbl_after_poll
+      | Some _ -> I.jmp (label gc_call_label)
       end
   | Lop(Iintop(Icomp cmp)) ->
       I.cmp (arg i 1) (arg i 0);
@@ -691,7 +714,6 @@ let emit_instr env fallthrough i =
       I.movsxd (arg32 i 0) (res i 0)
   | Lop(Ispecific(Izextend32)) ->
       I.mov (arg32 i 0) (res32 i 0)
-  | Lop (Iname_for_debugger _) -> ()
   | Lreloadretaddr ->
       ()
   | Lreturn ->
@@ -764,7 +786,8 @@ let emit_instr env fallthrough i =
 
       begin match system with
       | S_mingw64 | S_cygwin -> D.section [".rdata"] (Some "dr") []
-      | S_macosx | S_win64 -> () (* with LLVM/OS X and MASM, use the text segment *)
+      | S_macosx | S_win64 -> ()
+        (* with LLVM/OS X and MASM, use the text segment *)
       | _ -> D.section [".rodata"] None []
       end;
       D.align 4;
